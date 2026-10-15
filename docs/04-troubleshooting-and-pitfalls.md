@@ -81,3 +81,18 @@
 | 粘贴 `hosts.txt` 到后台 | 旧版文件名，现在填 `nodes.txt` 的网址 |
 | Pages 目录选 `/public` | Pages 来源选 GitHub Actions，直接上传 `public/` 产物 |
 | 工作流里再写一步用 API 开启 Pages | `scripts/20-publish-repo.sh` 已处理 |
+### 订阅域名失效：Clash Verge 里 edgetunnel 订阅「几天前更新」，刷新一直失败
+
+**现象**：订阅卡片的更新时间停在几天前，日志出现 `tls handshake eof`，但其他订阅正常。
+
+**排查（命令在 WSL 或 PowerShell 里运行）**：
+
+1. 绕过 Clash 的 fake-ip 查真实解析（Clash 开着时，系统 DNS 会返回 `198.18.x.x`，那是假地址，不能用来判断）：
+   ```bash
+   curl -sS -H "accept: application/dns-json" "https://1.1.1.1/dns-query?name=<你的edgetunnel域名>&type=A"
+   ```
+   返回 `"Status":3` 就是 NXDOMAIN，说明 DNS 记录已经被删掉了。
+2. 到 Cloudflare 控制台确认：Workers 里是否还有 edgetunnel、该 Worker 的「自定义域」是否还在、DNS 里是否有对应记录。
+3. 删除 Worker 时，它的自定义域和 DNS 记录会一起消失。KV 命名空间和 `ADMIN` 变量需要重新绑定。
+
+**修复**：按 06 练习指南第 2 步重新部署 edgetunnel（Worker + `ADMIN` 变量 + 名为 `KV` 的绑定 + 自定义域），登录 `/admin` 填入 `nodes.txt` 网址，然后在 Clash Verge 里编辑 edgetunnel 订阅的 URL（新部署会生成新的 UUID 和订阅 token），再刷新。

@@ -78,3 +78,21 @@ curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
 ## 轮换令牌
 
 令牌只在 WSL 的 env 文件和 Pulumi 状态中。更换后重新执行 `bash scripts/10-deploy-pulumi.sh`，Secret `DOMAIN` 内容不变，无需改动。
+## Clash Verge 侧：刷新订阅与测试
+
+**原则：Clash Verge 里不需要替换任何配置源。** 订阅地址仍然是 edgetunnel 的 `/sub`，节点来源在 edgetunnel 后台的「自定义优选IP」框里换成 `nodes.txt` 网址。后台保存之后，在 Clash Verge 里刷新订阅即可拿到新节点。
+
+1. 确认 edgetunnel 后台已填入 `https://<用户名>.github.io/<仓库名>/nodes.txt` 并保存。
+2. Clash Verge → 订阅（Profiles）→ 找到 edgetunnel 那一项 → 点右上角刷新图标。卡片上的时间会变成刚刚。
+3. 进入「代理」页，选中链式代理 / 住宅IP 对应的组，点测速（闪电图标）。能出现延迟数字的就是可用节点。
+4. 打开 https://ipinfo.io 或 https://ip.sb，确认出口 IP 的国家和运营商符合预期（日本 / 韩国的住宅或 ISP 地址）。
+
+### 订阅刷新失败：先看日志
+
+Clash Verge 的日志在 `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\logs\latest.log`，搜索「订阅更新」。常见信息：
+
+| 日志 | 含义 | 处理 |
+|---|---|---|
+| `tls handshake eof` / `SSL connection could not be established` | 域名解析不到或 Worker 不存在 | 见 04 排错「订阅域名失效」 |
+| `HTTP 401/403` | 订阅 token 变了 | 到 edgetunnel `/admin` 复制新的订阅地址，在 Clash Verge 里编辑该订阅的 URL |
+| 刷新成功但没有新节点 | 后台没保存 `nodes.txt` 地址，或 Actions 还没产出 | 访问 `nodes.txt` 网址确认有内容，再回后台检查 |
