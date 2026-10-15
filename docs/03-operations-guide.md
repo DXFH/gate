@@ -96,3 +96,39 @@ Clash Verge 的日志在 `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\lo
 | `tls handshake eof` / `SSL connection could not be established` | 域名解析不到或 Worker 不存在 | 见 04 排错「订阅域名失效」 |
 | `HTTP 401/403` | 订阅 token 变了 | 到 edgetunnel `/admin` 复制新的订阅地址，在 Clash Verge 里编辑该订阅的 URL |
 | 刷新成功但没有新节点 | 后台没保存 `nodes.txt` 地址，或 Actions 还没产出 | 访问 `nodes.txt` 网址确认有内容，再回后台检查 |
+
+## v2 更新：三网入口 + 入口存活探测（2026-10-15）
+
+### 新增的输出文件
+
+每次 Actions 运行后，Pages 上有 4 份节点列表，格式相同，只是节点前面的“入口地址”不同：
+
+| 文件 | 入口来源 | 适合谁 |
+|---|---|---|
+| `nodes.txt` | 静态优选域名 + `OPTIMAL_API`（默认电信 ct） | 默认，向后兼容 |
+| `nodes-ct.txt` | 静态域名 + 电信优选 IP | 电信宽带 |
+| `nodes-cu.txt` | 静态域名 + 联通优选 IP | 联通宽带 |
+| `nodes-cmcc.txt` | 静态域名 + 移动优选 IP | 移动宽带 |
+
+地址形如 `https://dxfh.github.io/gate/nodes-cu.txt`。在 edgetunnel `/admin` 的「自定义优选IP」框里填你所在运营商对应的那一份，保存即可，Clash Verge 不用改。
+
+### 入口存活探测
+
+生成入口池后，脚本在 Actions 里对每个入口做 TCP 连接（默认超时 4 秒），已经失效的域名或 IP 会被剔除，日志里有 `入口探测: 剔除 N 个` 的警告。注意：
+- 这只能判断“入口还活着”，**不代表你本地宽带到它的速度**，因为探测是在 GitHub 的机房里做的。
+- 如果探测全部失败（多半是 Actions 网络问题），脚本会保留原入口池，不会产出空池。
+- 关闭：仓库变量或 workflow 里设 `ENTRY_PROBE=0`；不想生成三网文件设 `CARRIER_OUTPUTS=0`。
+
+### 优选域名与优选 API 怎么选
+
+- 静态域名池：仓库变量 `EDGE_HOSTS`（逗号分隔，带端口），留空用内置的 20 个。
+- 优选 API：仓库变量 `OPTIMAL_API`，留空为 `https://cf.090227.xyz/ct?ips=6&port=443`。三网文件固定使用 `/ct`、`/cu`、`/cmcc` 三个接口。
+- 更新节奏：Actions 每 2 小时一次；edgetunnel 每次被拉订阅时现读 `nodes*.txt`；Clash 的住宅源每 1 小时刷新。
+
+### 原先教程里的 `SUB`（优选订阅生成器）
+
+edgetunnel 后台 config 里原来有 `SUB: cm.soso.edu.kg`。在 `/admin/init` 重置后它被清空。现在入口只来自 `nodes*.txt`，不依赖外部订阅生成器；想恢复可在后台「优选订阅生成」里重新填写。
+
+### `/admin/init` 重置后必须检查
+
+`优选订阅生成 → 本地IP库`：`随机IP` 要关闭、`随机数量` 要 ≥ 节点数（建议 72），否则订阅会忽略 `nodes.txt` 只出 16 个随机节点。

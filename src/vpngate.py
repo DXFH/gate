@@ -18,6 +18,7 @@ import json
 import os
 import re
 import random
+import socket
 import sys
 import threading
 import time
@@ -101,6 +102,18 @@ EDGE_HOSTS = [
 
 # 优选 API 地址配置 (支持逗号分隔多个，可配置在 GitHub Action Secret / Env 中)
 OPTIMAL_API = os.environ.get("OPTIMAL_API", "https://cf.090227.xyz/ct?ips=6&port=443")  # 设为空字符串可关闭; 仓库变量 vars.OPTIMAL_API 留空则用此默认值
+
+# 三网优选 API (电信 ct / 联通 cu / 移动 cmcc); 每个运营商额外生成 nodes-<key>.txt, 按自己的宽带选用
+CARRIER_PER_API = "ips=6&port=443"
+CARRIER_APIS = {
+    "ct": "https://cf.090227.xyz/ct?" + CARRIER_PER_API,
+    "cu": "https://cf.090227.xyz/cu?" + CARRIER_PER_API,
+    "cmcc": "https://cf.090227.xyz/cmcc?" + CARRIER_PER_API,
+}
+CARRIER_OUTPUTS = os.environ.get("CARRIER_OUTPUTS", "1").strip().lower() not in ("0", "false", "no", "")
+# 入口存活探测: 在 Actions 里对每个入口做 TCP 连接探测, 剔除已失效的域名/IP (仅判存活, 不代表你本地宽带的速度)
+ENTRY_PROBE = os.environ.get("ENTRY_PROBE", "1").strip().lower() not in ("0", "false", "no", "")
+ENTRY_PROBE_TIMEOUT = float(os.environ.get("ENTRY_PROBE_TIMEOUT", "4"))
 
 NODES_URL = os.environ.get("NODES_URL", "https://YOUR_GITHUB_USERNAME.github.io/gate/nodes.txt")
 
@@ -293,18 +306,42 @@ def fetch_optimal_api_endpoints(api_urls_str):
             log("OPTIMAL API", f"拉取优选 API 失败 ({url}): {e}")
     return endpoints
 
-def get_combined_edge_hosts():
+def probe_entries(entries):
+    """TCP 探测入口 host:port, 返回存活入口 (保持原顺序). 全部失败时返回原列表, 绝不产生空池."""
+    if not ENTRY_PROBE or not entries:
+        return entries
+    def one(e):
+        host, _, port = e.rpartition(":")
+        if not host:
+            host, port = e, "443"
+        try:
+            with socket.create_connection((host, int(port)), timeout=ENTRY_PROBE_TIMEOUT):
+                return True
+        except Exception:
+            return False
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        flags = list(ex.map(one, entries))
+    alive = [e for e, ok in zip(entries, flags) if ok]
+    dead = [e for e, ok in zip(entries, flags) if not ok]
+    if dead:
+        warn("入口探测: 剔除 %d 个不可连接入口: %s" % (len(dead), ", ".join(dead)))
+    log("ENTRY PROBE", "存活 %d/%d" % (len(alive), len(entries)))
+    if not alive:
+        warn("入口探测全部失败 (可能是 Actions 网络问题), 保留原入口池, 不做剔除")
+        return entries
+    return alive
+
+def get_combined_edge_hosts(api_urls=None):
     """
-    合并静态优选域名与优选 API 端点
+    合并静态优选域名与优选 API 端点, 并剔除探测不通的入口
     """
-    # 1. 优先读取 HOSTS_ENTRY 或 EDGE_HOSTS
+    if api_urls is None:
+        api_urls = OPTIMAL_API
     _entry = os.environ.get("HOSTS_ENTRY", "").strip()
     static_hosts = [e.strip() for e in _entry.split(",") if e.strip()] if _entry else EDGE_HOSTS
 
-    # 2. 拉取优选 API 端点
-    api_hosts = fetch_optimal_api_endpoints(OPTIMAL_API)
+    api_hosts = fetch_optimal_api_endpoints(api_urls)
 
-    # 3. 合并与去重 (保留原始列表顺序)
     combined = []
     seen = set()
     for h in static_hosts + api_hosts:
@@ -313,6 +350,7 @@ def get_combined_edge_hosts():
             combined.append(h)
 
     log("EDGE POOL", f"汇总入口地址池: 静态域名 {len(static_hosts)} 个, API 获取 {len(api_hosts)} 个, 合并有效入口共 {len(combined)} 个")
+    combined = probe_entries(combined)
     return combined if combined else EDGE_HOSTS
 
 # ---------------------------------------------------------------------------
@@ -533,7 +571,7 @@ def build_nodes_text(data, edge_hosts):
             lines.append(f"{entry}#{zh}-机房-{i:02d}$sstp://vpn:vpn@{n['host']}:{n['port']}")
     return "\n".join(lines) + "\n"
 
-def write_outputs(data, edge_hosts):
+def write_outputs(data, edge_hosts, carrier_hosts=None):
     os.makedirs(PUBLIC_DIR, exist_ok=True)
     data_path = os.path.join(PUBLIC_DIR, "data.json")
     with open(data_path, "w", encoding="utf-8") as f:
@@ -555,6 +593,10 @@ def write_outputs(data, edge_hosts):
     nodes_path = os.path.join(PUBLIC_DIR, "nodes.txt")
     with open(nodes_path, "w", encoding="utf-8") as f:
         f.write(build_nodes_text(data, edge_hosts))
+
+    for key, hosts in (carrier_hosts or {}).items():
+        with open(os.path.join(PUBLIC_DIR, f"nodes-{key}.txt"), "w", encoding="utf-8") as f:
+            f.write(build_nodes_text(data, hosts))
 
     return data_path, html_path, nodes_path
 
@@ -613,10 +655,20 @@ def main():
     # 动态拉取 API 并与静态优选域名混合
     edge_hosts = get_combined_edge_hosts()
 
-    data_path, html_path, nodes_path = write_outputs(data, edge_hosts)
+    carrier_hosts = {}
+    if CARRIER_OUTPUTS:
+        for key, api in CARRIER_APIS.items():
+            try:
+                carrier_hosts[key] = get_combined_edge_hosts(api)
+            except Exception as exc:
+                warn(f"运营商 {key} 入口池生成失败, 跳过 nodes-{key}.txt: {exc}")
+
+    data_path, html_path, nodes_path = write_outputs(data, edge_hosts, carrier_hosts)
     log("WEBSITE", f"生成 {os.path.relpath(data_path, REPO_DIR)}")
     log("WEBSITE", f"生成 {os.path.relpath(html_path, REPO_DIR)}")
     log("WEBSITE", f"生成 {os.path.relpath(nodes_path, REPO_DIR)}")
+    for key in carrier_hosts:
+        log("WEBSITE", f"生成 nodes-{key}.txt (入口 {len(carrier_hosts[key])} 个)")
     log("USAGE", f"自动轮换: 把 {NODES_URL} 填入 edgetunnel 后台「自定义优选IP」框 (一次配置, 之后自动更新)")
     set_output("publish", "true")
     set_output("available", str(len(success)))
