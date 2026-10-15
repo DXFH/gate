@@ -2,7 +2,7 @@ name: VPN Gate Node Check
 
 on:
   schedule:
-    - cron: "17 */6 * * *"   # every 6 hours (UTC); adjust here
+    - cron: "17 */2 * * *"   # every 2 hours (UTC); recommended 1-2h, avoid <30min (VPN Gate rate limit)
   workflow_dispatch:
 
 permissions:
@@ -46,6 +46,9 @@ jobs:
           CHECK_TIMEOUT: "90"
           RETRY_ATTEMPTS: "3"
           BREAKER_THRESHOLD: "25"
+          # Optional repo Variables (Settings > Secrets and variables > Actions > Variables); empty = built-in defaults
+          EDGE_HOSTS: ${{ vars.EDGE_HOSTS }}
+          OPTIMAL_API: ${{ vars.OPTIMAL_API || 'https://cf.090227.xyz/ct?ips=6&port=443' }}
 
       # Only publish when a valid, non-empty result was produced; otherwise the previous Pages deployment stays live.
       - name: Configure Pages

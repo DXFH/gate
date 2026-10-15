@@ -8,6 +8,8 @@ export PATH="$HOME/.pulumi/bin:$PATH" PULUMI_CONFIG_PASSPHRASE=""
 mkdir -p "$HOME/.pulumi-gate-state"
 pulumi login "file://$HOME/.pulumi-gate-state" >/dev/null
 pulumi stack select dev 2>/dev/null || pulumi stack init dev
+# resources deleted by hand (repo/worker/secret) are re-created: sync state first
+pulumi refresh --yes --skip-preview --non-interactive 2>&1 | tail -5 || true
 pulumi up --yes --skip-preview --non-interactive 2>&1 | sed -E 's/(github_pat_|ghp_|cfut_)[A-Za-z0-9_]+/\1***/g'
 echo "--- outputs (secrets hidden)"
 pulumi stack output
