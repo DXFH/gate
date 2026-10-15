@@ -96,3 +96,11 @@
 3. 删除 Worker 时，它的自定义域和 DNS 记录会一起消失。KV 命名空间和 `ADMIN` 变量需要重新绑定。
 
 **修复**：按 06 练习指南第 2 步重新部署 edgetunnel（Worker + `ADMIN` 变量 + 名为 `KV` 的绑定 + 自定义域），登录 `/admin` 填入 `nodes.txt` 网址，然后在 Clash Verge 里编辑 edgetunnel 订阅的 URL（新部署会生成新的 UUID 和订阅 token），再刷新。
+## 坑：在 /admin 点「重置」后节点数骤降、全部 timeout
+
+现象：重置后订阅只有 16 个节点，名称不再带「住宅」，或 Clash 里整组 timeout。
+原因：
+1. 重新部署若复用旧的 KV，旧的 config.json 里 HOSTS 会指向旧的 Pages 域名，节点的 SNI/Host 与 UUID 不匹配，所有节点超时。解决：访问 /admin/init 重置，让 HOSTS 回到当前 Worker 域名。
+2. 重置会把「优选订阅生成 → 本地IP库 → 随机IP」恢复为 true，且随机数量为 16，此时订阅忽略 ADD.txt（nodes.txt）。解决：把随机IP改为 false、随机数量改为 72 以上，再保存。
+3. 重置不会清除 ADD.txt，但仍建议先备份：GET /admin/config.json 与 /admin/ADD.txt。
+验证：订阅里 type: vless 的数量应等于 nodes.txt 的行数；Clash 里更新 provider 后对「免费住宅IP」组做组延迟测试，应有延迟数字。
