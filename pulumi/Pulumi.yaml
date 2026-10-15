@@ -1,0 +1,3 @@
+name: gate-iac
+runtime: nodejs
+description: CheckSocks5 Worker (Cloudflare) + gate repo DOMAIN secret (GitHub)

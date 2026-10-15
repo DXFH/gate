@@ -1,0 +1,11 @@
+{
+  "name": "gate-iac",
+  "private": true,
+  "main": "index.ts",
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.6.0" },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/github": "^6.0.0",
+    "@pulumi/cloudflare": "^6.0.0"
+  }
+}
